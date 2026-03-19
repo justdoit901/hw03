@@ -1,1 +1,71 @@
+# 导入需要的库
+import face_recognition
+import numpy as np
+from pathlib import Path
+from PIL import Image
+import cv2
 
+# 功能1：加载人脸库，返回【人脸名称列表】和【128维特征编码列表】
+def load_face_database(db_path="face_database"):
+    # 初始化人脸库目录，不存在则创建
+    db_dir = Path(db_path)
+    if not db_dir.exists():
+        db_dir.mkdir(exist_ok=True)
+        return [], []  # 无人脸库时返回空列表
+    face_names = []  # 存人脸名称（图片文件名）
+    face_encodings = []  # 存人脸128维特征编码
+    # 遍历人脸库所有jpg/png图片
+    for img_file in db_dir.glob("*.[jp][pn]g"):
+        face_names.append(img_file.stem)  # 取图片名（如"张三.jpg"→"张三"）
+        # 加载图片并提取特征编码
+        img = face_recognition.load_image_file(str(img_file))
+        img_encodings = face_recognition.face_encodings(img)
+        # 确保图片能提取到特征（避免模糊图片）
+        if len(img_encodings) > 0:
+            face_encodings.append(img_encodings[0])
+    return face_names, face_encodings
+
+# 功能2：人脸检测+128维特征编码（作业核心要求）
+def detect_and_encod_face(image):
+    # 统一转换为face_recognition支持的RGB格式
+    if isinstance(image, Image.Image):
+        img = np.array(image.convert("RGB"))
+    else:
+        img = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+    # 人脸检测：hog模型（轻量，CPU可用，作业足够），返回人脸位置(top, right, bottom, left)
+    face_locations = face_recognition.face_locations(img, model="hog")
+    # 提取128维特征编码（作业强制要求）
+    face_encodings = face_recognition.face_encodings(img, face_locations)
+    # 返回：检测到的人脸位置 + 对应128维特征
+    return face_locations, face_encodings
+
+# 功能3：人脸比对（可选，作业加分，返回匹配名称+置信度）
+def match_face(face_encoding, face_names, face_encodings, tolerance=0.6):
+    # 无人脸库时，直接返回未知
+    if len(face_encodings) == 0:
+        return "Unknown", 0.0
+    # 计算待测人脸与库中人脸的距离（距离越小越相似）
+    distances = face_recognition.face_distance(face_encodings, face_encoding)
+    best_match_idx = np.argmin(distances)  # 取最相似的人脸索引
+    # 距离小于阈值则匹配，否则未知
+    if distances[best_match_idx] < tolerance:
+        match_name = face_names[best_match_idx]
+        confidence = 1 - distances[best_match_idx]  # 置信度（0~1，越高越准）
+        return match_name, round(confidence, 2)
+    else:
+        return "Unknown", 0.0
+
+# 功能4：绘制人脸框+标签（作业要求：展示检测结果）
+def draw_face_box(image, face_locations, face_labels):
+    # 转换图片格式，方便绘制
+    img = np.array(image.convert("RGB"))
+    # 遍历每一个检测到的人脸，绘制框和标签
+    for (top, right, bottom, left), label in zip(face_locations, face_labels):
+        # 绘制红色人脸框（线宽2）
+        cv2.rectangle(img, (left, top), (right, bottom), (0, 0, 255), 2)
+        # 绘制标签背景（红色填充）
+        cv2.rectangle(img, (left, bottom - 35), (right, bottom), (0, 0, 255), cv2.FILLED)
+        # 绘制标签文字（白色，宋体）
+        cv2.putText(img, label, (left + 6, bottom - 6), cv2.FONT_HERSHEY_DUPLEX, 0.8, (255, 255, 255), 1)
+    # 转换回PIL格式，供Streamlit展示
+    return Image.fromarray(cv2.cvtColor(img, cv2.COLOR_BGR2RGB))
